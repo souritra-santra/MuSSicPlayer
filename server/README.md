@@ -86,10 +86,21 @@ HTTPS-less LAN may be blocked by App Transport Security; prefer HTTPS.
 | `--mode` | `tunnel` | `tunnel` (relay; use for phones) or `redirect` (direct link; same egress IP only). |
 | `--api-key` | off | If set, require `Authorization: Apikey <key>` on POST. |
 | `--public-url` | request Host | Public base URL for tunnel links (needed behind a proxy / on the internet). |
+| `--cookies` | off | Netscape-format cookies file for yt-dlp (see *Authenticating with YouTube*). |
+| `--player-client` | yt-dlp default | Force a YouTube player client (e.g. `tv`, `web_safari`) on every attempt. |
 
 Environment variables: `YTDLP_RESOLVER_API_KEY`, `YTDLP_RESOLVER_MODE`,
-`YTDLP_RESOLVER_PUBLIC_URL`, `YTDLP_RESOLVER_HOST`, `YTDLP_RESOLVER_PORT`,
-`YTDLP_BIN` (path to the `yt-dlp` executable), `YTDLP_JS_RUNTIME`.
+`YTDLP_RESOLVER_PUBLIC_URL`, `YTDLP_RESOLVER_HOST`, `YTDLP_RESOLVER_PORT`
+(falls back to the platform's `PORT`), `YTDLP_BIN` (path to the `yt-dlp`
+executable), `YTDLP_JS_RUNTIME` (default `node`), `YTDLP_COOKIES`,
+`YTDLP_PLAYER_CLIENT`.
+
+`GET /health` echoes a one-line toolchain summary, so you can see exactly what
+a hosted instance is running:
+
+```json
+{"ok": true, "deps": "yt-dlp 2026.09.27.232945; js runtime node (found at /usr/bin/node); cookies off"}
+```
 
 ### Quality
 
@@ -122,7 +133,27 @@ What is and isn't protected:
   HTTP GET and cannot attach headers, so the stream URL *is* the credential:
   a random 128-bit token, handed out only to callers who passed the API key,
   expiring after 45 minutes.
-* `GET /health` — open; it only reveals `{"ok": true}`.
+* `GET /health` — open; it only reveals the `ok`/`deps` summary.
+
+### Authenticating with YouTube (cookies)
+
+On datacenter hosts (Render, Hugging Face Spaces, most VPSes) YouTube frequently
+answers extraction with `Sign in to confirm you're not a bot` or `Failed to
+extract any player response`. Exporting a YouTube cookies file and pointing the
+server at it is the reliable fix:
+
+1. Export cookies in **Netscape** format from a browser signed in to YouTube — a
+   "Get cookies.txt" extension, or `yt-dlp --cookies-from-browser chrome
+   --cookies cookies.txt` on a machine with that browser.
+2. Point the server at the file: `--cookies cookies.txt` or
+   `YTDLP_COOKIES=/path/cookies.txt`. On Render, add it as a **Secret File**
+   mounted at `/etc/secrets/cookies.txt` and set
+   `YTDLP_COOKIES=/etc/secrets/cookies.txt`.
+3. Cookies expire (log out, password change, weeks of inactivity) — re-export if
+   resolution starts failing again.
+
+If an instance is refused even with cookies, try `--player-client tv` (also
+`web_safari`, `mweb`); which client YouTube trusts varies by IP range.
 
 ## Deploy to Hugging Face Spaces
 
@@ -161,7 +192,9 @@ internet.
    | `YTDLP_RESOLVER_PUBLIC_URL` | `https://<user>-<space>.hf.space` — makes tunnel links exact; normally derived from the proxy's forwarded headers anyway, so this is a belt-and-braces override |
 
 4. **Wait for the build** (a few minutes), then open
-   `https://<user>-<space>.hf.space/health` → `{"ok": true}`.
+   `https://<user>-<space>.hf.space/health` → `{"ok": true, "deps": "..."}` (the
+   `deps` string confirms the yt-dlp version, JS runtime, and whether cookies
+   loaded).
 
 5. **In the app**: *Settings → Stream resolver* → endpoint
    `https://<user>-<space>.hf.space`, API token = the same key. Both fields
@@ -170,14 +203,40 @@ internet.
 Caveats on the free tier:
 
 * Spaces **sleep after ~2 days of inactivity**; the first request after a
-  wake pays the container start plus yt-dlp's EJS warm-up (the app's 45s
+  wake pays the container start plus yt-dlp's EJS warm-up (the app's 75s
   resolve timeout covers it), after which the 10-minute cache keeps it warm.
 * YouTube flags some **datacenter IP ranges**. If resolves work on your
   machine but fail (or come back as ~70s capped previews) from the Space,
-  that's why — yt-dlp's EJS defeats the bot checks, but not IP reputation.
-  See the table below and test right after deploying.
+  that's why — add a cookies file (see *Authenticating with YouTube*) and
+  re-check `/health`.
 * Seeking depends on the proxy passing `Range` through — tap midway into a
   song immediately after deploying to confirm.
+
+## Deploy to Render
+
+The free instance is CPU-light, so the first (cold) resolve can take a while —
+the app's resolver timeout is sized to cover it.
+
+1. **New → Web Service**, connect the repo, and set **Root Directory** to
+   `server`.
+2. For **Language** pick **Docker** — Render builds `server/Dockerfile`, which
+   installs Node for yt-dlp's EJS solver.
+3. Add environment variables / secrets:
+
+   | Variable | Value |
+   | --- | --- |
+   | `YTDLP_RESOLVER_API_KEY` | a long random string |
+   | `YTDLP_COOKIES` | `/etc/secrets/cookies.txt`, after adding that file under **Secret Files** — this is what makes Render's datacenter IP work (see *Authenticating with YouTube*) |
+   | `YTDLP_RESOLVER_PUBLIC_URL` | optional — `https://<service>.onrender.com` |
+
+4. Deploy, then open `https://<service>.onrender.com/health` and confirm the
+   `deps` string shows a recent yt-dlp, `js runtime node (found ...)`, and
+   `cookies set (...)`.
+5. In the app: endpoint `https://<service>.onrender.com`, API token = the key.
+
+Free Render services spin down after ~15 minutes idle; a request during the
+wake-up may return Render's loading page instead of JSON, so the first resolve
+after a long pause can need a retry.
 
 ### Other hosting options
 
@@ -188,14 +247,16 @@ costs nothing:
 | Host | Cost | Watch out for |
 | --- | --- | --- |
 | Your PC + [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) | free | the PC must be on; Funnel/trycloudflare gives you a public HTTPS URL with no port forwarding |
-| Hugging Face Spaces | free | sleeps when idle; datacenter IPs may be flagged by YouTube |
+| Hugging Face Spaces / Render | free | sleeps when idle; datacenter IPs are usually refused by YouTube, so add a cookies file (see *Authenticating with YouTube*) |
 | Oracle Cloud *always free* ARM VM | free (card required) | a real always-on VPS with a static IP; same datacenter-IP caveat |
-| Render / Koyeb / Fly.io | free tier or cheap | free instances spin down or burn through credits quickly |
+| Koyeb / Fly.io | free tier or cheap | free instances spin down or burn through credits quickly |
 
-Recommendation: start with HF Spaces above — it's the easiest hosted option
-and this repo is already set up for it. If YouTube turns away the Space's IP,
-move the same Docker image (or run the script) on a tunnel in front of your
-own box; the app only needs an HTTPS URL plus the API token.
+Recommendation: any datacenter host needs a cookies file to satisfy YouTube;
+start with whichever of these you already have (the section above for your
+platform), set `YTDLP_COOKIES`, and confirm via `/health`. If YouTube still
+turns it away, run the same Docker image on a tunnel in front of your own box —
+residential IPs rarely need cookies at all. The app only needs an HTTPS URL
+plus the API token.
 
 ## Verification
 
@@ -222,7 +283,15 @@ curl -H 'Range: bytes=1300000-1308191' http://127.0.0.1:8080/stream/<token>
   anti-bot measures; update yt-dlp to the latest nightly and retry.
 * **Slow first request** — the first extraction after install fetches EJS
   components. Later requests are cached (10 minutes in memory) and fast. The
-  app's resolver timeout (45s) covers this.
+  app's resolver timeout (75s) covers this.
+* **`Failed to extract any player response` on a hosted instance** — YouTube is
+  refusing that server's IP range (datacenter hosts get this constantly). Add a
+  cookies file (`--cookies` / `YTDLP_COOKIES`; see *Authenticating with
+  YouTube*) and re-check `/health`'s `deps`, or try `--player-client tv`. The
+  server logs the last few yt-dlp lines for each failed strategy, so the real
+  cause is visible in the host's log.
+* **`Failed to extract any player response` even on your own machine** — the
+  installed yt-dlp is stale; update to the nightly (`--pre`).
 * **All strategies fail for a specific video** — some uploads are pot/nsig-
   protected or geo-restricted even for yt-dlp; no client can currently stream
   those, and the error message in the app will say so.

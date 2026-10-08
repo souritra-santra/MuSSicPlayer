@@ -98,9 +98,10 @@ function audioQualityFor(config: ResolverConfig | undefined): 'best' | 320 | 256
  *
  * Deliberately generous: self-hosted yt-dlp resolvers (see server/) warm up on
  * first use — the EJS component fetch can take tens of seconds — and some
- * instances transcode before answering.
+ * instances transcode before answering. Free-tier hosts (Render, Spaces) are
+ * slow enough that a cold first resolve can push past a minute.
  */
-const RESOLVE_TIMEOUT_MS = 45_000;
+const RESOLVE_TIMEOUT_MS = 75_000;
 
 type CobaltResponse = {
   status?: string;

@@ -69,6 +69,8 @@ from urllib.parse import urlparse
 API_KEY_ENV = "YTDLP_RESOLVER_API_KEY"
 BIN_ENV = "YTDLP_BIN"
 JS_RUNTIME_ENV = "YTDLP_JS_RUNTIME"
+COOKIES_ENV = "YTDLP_COOKIES"
+PLAYER_CLIENT_ENV = "YTDLP_PLAYER_CLIENT"
 PUBLIC_URL_ENV = "YTDLP_RESOLVER_PUBLIC_URL"
 
 # How long a single yt-dlp extraction may take. Cold starts can be slow (EJS
@@ -122,11 +124,45 @@ def build_ytdlp_command(client: Optional[str]) -> list[str]:
     else:
         base = [sys.executable, "-m", "yt_dlp"]
 
-    cmd = [*base, "--no-warnings", "--no-playlist", "--js-runtimes", "node"]
+    # No --no-warnings: the warnings yt-dlp prints on failure (bot wall, missing
+    # JS runtime, nsig problems) are exactly what makes a hosted instance
+    # debuggable, and they only go to stderr, which we ignore on success.
+    runtime = os.environ.get(JS_RUNTIME_ENV) or "node"
+    cmd = [*base, "--no-playlist", "--js-runtimes", runtime]
+    cookies = os.environ.get(COOKIES_ENV)
+    if cookies:
+        cmd += ["--cookies", cookies]
+    # An explicit client wins, then the per-strategy one, then the env default.
+    client = client or os.environ.get(PLAYER_CLIENT_ENV) or None
     if client:
         cmd += ["--extractor-args", f"youtube:player_client={client}"]
     cmd += ["--user-agent", USER_AGENT]
     return cmd
+
+
+def dependency_report() -> str:
+    """One-line summary of the yt-dlp toolchain (startup log + /health)."""
+    runtime = os.environ.get(JS_RUNTIME_ENV) or "node"
+    runtime_path = shutil.which(runtime)
+    runtime_desc = f"found at {runtime_path}" if runtime_path else "NOT FOUND"
+    try:
+        proc = subprocess.run(
+            [*build_ytdlp_command(None), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        lines = (proc.stdout or proc.stderr or "unknown").strip().splitlines()
+        version = lines[0].strip() if lines else "unknown"
+    except (OSError, subprocess.SubprocessError):
+        version = "not found"
+    cookies = os.environ.get(COOKIES_ENV)
+    cookies_desc = f"set ({cookies})" if cookies else "off"
+    return (
+        f"yt-dlp {version}; js runtime {runtime} ({runtime_desc}); "
+        f"cookies {cookies_desc}"
+    )
 
 
 def extract_stream(
@@ -164,8 +200,12 @@ def extract_stream(
         ) from exc
 
     if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        detail = [ln for ln in (proc.stderr or proc.stdout or "").splitlines() if ln.strip()]
         tail = detail[-1] if detail else f"yt-dlp exited with {proc.returncode}"
+        # The final line alone often hides the cause (bot wall, preview cap,
+        # missing JS runtime), so keep the last few lines in the server log.
+        if len(detail) > 1:
+            log("yt-dlp output:\n  " + "\n  ".join(detail[-6:]))
         raise RuntimeError(f"yt-dlp failed: {tail[:500]}")
 
     lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
@@ -254,10 +294,17 @@ def resolve_with_fallback(
 
 
 class ResolverState:
-    def __init__(self, mode: str, api_key: Optional[str], public_url: Optional[str]):
+    def __init__(
+        self,
+        mode: str,
+        api_key: Optional[str],
+        public_url: Optional[str],
+        deps: str = "",
+    ):
         self.mode = mode
         self.api_key = api_key
         self.public_url = public_url
+        self.deps = deps
         self.lock = threading.Lock()
         # token -> (upstream url, expiry)
         self.streams: dict[str, Tuple[str, float]] = {}
@@ -453,7 +500,7 @@ class ResolverHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/health":
-            self._send_json({"ok": True})
+            self._send_json({"ok": True, "deps": self.state.deps})
             return
         token = self.path.removeprefix("/stream/")
         if not token or "/" in token:
@@ -661,7 +708,14 @@ def main() -> int:
     )
     parser.add_argument("--host", default=os.environ.get("YTDLP_RESOLVER_HOST", "0.0.0.0"))
     parser.add_argument(
-        "--port", type=int, default=int(os.environ.get("YTDLP_RESOLVER_PORT", "8080"))
+        "--port",
+        type=int,
+        default=int(
+            os.environ.get("YTDLP_RESOLVER_PORT")
+            or os.environ.get("PORT")
+            or "8080"
+        ),
+        help="Listen port. Falls back to the platform's $PORT (Render/Heroku/Fly).",
     )
     parser.add_argument(
         "--mode",
@@ -681,15 +735,36 @@ def main() -> int:
         help="Base URL phones use to reach this server (e.g. https://resolver.example). "
         "Defaults to the Host header of the incoming request.",
     )
+    parser.add_argument(
+        "--cookies",
+        default=os.environ.get(COOKIES_ENV),
+        help="Netscape-format cookies file for yt-dlp. Fixes `Sign in to confirm "
+        "you're not a bot` on datacenter hosts (Render, Spaces, cheap VPS).",
+    )
+    parser.add_argument(
+        "--player-client",
+        default=os.environ.get(PLAYER_CLIENT_ENV),
+        help="Force a YouTube player client for every attempt (e.g. tv, "
+        "web_safari, mweb). Useful when a datacenter IP is refused.",
+    )
     args = parser.parse_args()
 
-    state = ResolverState(args.mode, args.api_key, args.public_url)
+    # The yt-dlp command builder reads these from the environment; promote any
+    # CLI values so both paths behave the same.
+    if args.cookies:
+        os.environ[COOKIES_ENV] = args.cookies
+    if args.player_client:
+        os.environ[PLAYER_CLIENT_ENV] = args.player_client
+
+    deps = dependency_report()
+    state = ResolverState(args.mode, args.api_key, args.public_url, deps)
     handler = type("ConfiguredHandler", (ResolverHandler,), {"state": state})
     server = ResolverServer((args.host, args.port), handler)
     log(
         f"listening on http://{args.host}:{args.port} mode={args.mode} "
         f"api_key={'set' if args.api_key else 'off'}"
     )
+    log(deps)
     log("POST / resolves a stream (cobalt dialect); GET /stream/<token> relays it.")
     if not args.api_key:
         log(
