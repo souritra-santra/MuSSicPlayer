@@ -288,6 +288,22 @@ def verify_stream(url: str, duration: Optional[float]) -> Tuple[str, Optional[fl
     )
 
 
+BOT_WALL_MARKERS = (
+    "too many requests",
+    "forbidden",
+    "sign in to confirm",
+    "not a bot",
+    "failed to extract any player response",
+    "http error 429",
+    "http error 403",
+)
+
+
+def _looks_like_bot_wall(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in BOT_WALL_MARKERS)
+
+
 def resolve_with_fallback(
     source_url: str, requested_quality: object
 ) -> Tuple[str, Optional[float]]:
@@ -310,6 +326,18 @@ def resolve_with_fallback(
         except RuntimeError as exc:
             last_error = str(exc)
             log(f"strategy {selector!r} client={client} failed: {exc}")
+
+    # A host whose IP YouTube refuses fails every strategy the same way. Say so
+    # explicitly, because "Failed to extract any player response" reads like a
+    # yt-dlp bug when it is really an authentication/IP problem.
+    if cookies_file() is None and _looks_like_bot_wall(last_error):
+        hint = (
+            "YouTube refused this host's IP (HTTP 429/403). Give the server a "
+            "signed-in cookies file: --cookies / YTDLP_COOKIES, or a Render "
+            "Secret File named cookies.txt (auto-detected at /etc/secrets/)."
+        )
+        log("hint: " + hint)
+        raise RuntimeError(f"{last_error} {hint}")
     raise RuntimeError(last_error)
 
 
