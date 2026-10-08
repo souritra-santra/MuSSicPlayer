@@ -199,7 +199,7 @@ internet.
 
 5. **In the app**: *Settings → Stream resolver* → endpoint
    `https://<user>-<space>.hf.space`, API token = the same key. Both fields
-   save on blur; restart playback so the player re-resolves.
+   save automatically as you type; restart playback so the player re-resolves.
 
 Caveats on the free tier:
 
@@ -287,10 +287,14 @@ curl -H 'Range: bytes=1300000-1308191' http://127.0.0.1:8080/stream/<token>
   app's resolver timeout (75s) covers this.
 * **`Failed to extract any player response` on a hosted instance** — YouTube is
   refusing that server's IP range (datacenter hosts get this constantly). Add a
-  cookies file (`--cookies` / `YTDLP_COOKIES`; see *Authenticating with
-  YouTube*) and re-check `/health`'s `deps`, or try `--player-client tv`. The
-  server logs the last few yt-dlp lines for each failed strategy, so the real
-  cause is visible in the host's log.
+  cookies file (`--cookies` / `YTDLP_COOKIES`, or a Secret File named
+  `cookies.txt`; see *Authenticating with YouTube*) and re-check `/health`'s
+  `deps`, or try `--player-client tv`. The server logs the last few yt-dlp lines
+  for each failed strategy, so the real cause is visible in the host's log.
+* **`deps` says `cookies set but UNREADABLE`** — the file is there but the
+  server user cannot read it. On Render, Secret Files are mounted for
+  `root:1000`; the bundled Dockerfile already puts the non-root `resolver` user
+  in group 1000, so rebuild from the current Dockerfile if you hit this.
 * **`Failed to extract any player response` even on your own machine** — the
   installed yt-dlp is stale; update to the nightly (`--pre`).
 * **All strategies fail for a specific video** — some uploads are pot/nsig-

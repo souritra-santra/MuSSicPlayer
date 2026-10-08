@@ -32,7 +32,13 @@ RUN python -c "import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)" \
 
 # Non-root: the server only needs to read its own code and write yt-dlp's
 # EJS/cache files under $HOME.
-RUN useradd --create-home --shell /usr/sbin/nologin resolver
+#
+# Render mounts Secret Files (e.g. /etc/secrets/cookies.txt) owned by
+# root:1000, so also join GID 1000 or the non-root server cannot read them.
+# Best-effort: the base image normally already gives `resolver` GID 1000.
+RUN useradd --create-home --shell /usr/sbin/nologin resolver \
+    && { usermod -aG 1000 resolver || true; } \
+    && id resolver
 USER resolver
 
 ENV YTDLP_RESOLVER_HOST=0.0.0.0 \

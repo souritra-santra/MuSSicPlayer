@@ -178,7 +178,18 @@ def dependency_report() -> str:
     except (OSError, subprocess.SubprocessError):
         version = "not found"
     cookies = cookies_file()
-    cookies_desc = f"set ({cookies})" if cookies else "off"
+    if cookies:
+        # Prove the file is actually readable: Render mounts Secret Files
+        # root-owned, so a permissions mistake would otherwise surface only as
+        # an opaque yt-dlp failure at resolve time.
+        try:
+            with open(cookies, "rb") as handle:
+                handle.read(1)
+            cookies_desc = f"set ({cookies})"
+        except OSError as exc:
+            cookies_desc = f"set but UNREADABLE ({cookies}: {exc})"
+    else:
+        cookies_desc = "off"
     return (
         f"yt-dlp {version}; js runtime {runtime} ({runtime_desc}); "
         f"cookies {cookies_desc}"
