@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -27,9 +27,9 @@ import { Text } from '@/components/ui/Text';
  * Three groups: playback (stream resolution and how it fails), sources (which
  * providers are enabled), and data (what is stored on-device).
  *
- * YouTube works without any configuration thanks to the built-in extractor, so
- * the resolver endpoint is an optional override. It still gets explanation,
- * because once supplied it also covers other video sources as a fallback.
+ * YouTube works without any configuration thanks to the built-in extractor. A
+ * resolver endpoint is an optional override: once supplied it is preferred for
+ * YouTube (full-length audio) and covers other video sources too.
  */
 
 const QUALITY_OPTIONS = [
@@ -91,8 +91,32 @@ export default function SettingsScreen() {
   const resolverConfig = useSettingsStore(useShallow(selectResolverConfig));
   const resolverConfigured = resolverConfig !== null;
 
-  const saveEndpoint = () => setResolverEndpoint(normalizeEndpoint(draftEndpoint));
+  const saveEndpoint = () => {
+    const next = normalizeEndpoint(draftEndpoint);
+    setDraftEndpoint(next);
+    setResolverEndpoint(next);
+  };
   const saveKey = () => setResolverApiKey(draftKey);
+
+  // Persist the endpoint as the user types (debounced). Saving only on blur
+  // loses the URL whenever the field never blurs — e.g. the user taps back or
+  // switches apps, which is exactly how a resolver looks "configured" in the UI
+  // while playback still uses the built-in extractor.
+  useEffect(() => {
+    const next = normalizeEndpoint(draftEndpoint);
+    if (next === endpoint) return;
+    const timer = setTimeout(() => setResolverEndpoint(next), 500);
+    return () => clearTimeout(timer);
+  }, [draftEndpoint, endpoint, setResolverEndpoint]);
+
+  // Same for the token: it is read at play time, so it must survive without a
+  // blur as well.
+  useEffect(() => {
+    const next = draftKey.trim();
+    if (next === apiKey) return;
+    const timer = setTimeout(() => setResolverApiKey(next), 500);
+    return () => clearTimeout(timer);
+  }, [draftKey, apiKey, setResolverApiKey]);
 
   return (
     <Screen edges={['top', 'bottom']}>
@@ -123,10 +147,10 @@ export default function SettingsScreen() {
           <Text variant="caption" color={colors.textTertiary} style={styles.explainer}>
             YouTube results play out of the box through a built-in stream extractor. YouTube
             currently streams most songs to third-party apps as a short preview, so full-length
-            playback of this track works once the resolver is set. The endpoint is also a
-            fallback for restricted videos and other video sources. Any cobalt-compatible
-            endpoint works; the repo ships a reference yt-dlp resolver under server/ that
-            plays full tracks (see server/README.md). Public cobalt instances use bot
+            playback works once the resolver is set — it is then preferred for YouTube, with the
+            built-in extractor as a fallback, and it covers other video sources too. Any
+            cobalt-compatible endpoint works; the repo ships a reference yt-dlp resolver under
+            server/ that plays full tracks (see server/README.md). Public cobalt instances use bot
             protection and ask third-party apps not to hardcode them, so you supply your own
             endpoint if you want one.
           </Text>

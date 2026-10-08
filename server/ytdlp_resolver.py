@@ -109,6 +109,26 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 )
 
+# yt-dlp refuses YouTube extraction on most datacenter IPs (Render, Hugging
+# Face, cheap VPSes) unless a signed-in cookies file is supplied. When
+# YTDLP_COOKIES is unset we look where a deploy commonly drops one, so a Render
+# Secret File named cookies.txt works without also setting an env var.
+DEFAULT_COOKIE_FILES = (
+    "/etc/secrets/cookies.txt",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"),
+)
+
+
+def cookies_file() -> Optional[str]:
+    """Cookies file to hand yt-dlp, or None when none is available."""
+    explicit = os.environ.get(COOKIES_ENV)
+    if explicit:
+        return explicit
+    for candidate in DEFAULT_COOKIE_FILES:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
 
 def log(msg: str) -> None:
     print(f"[ytdlp-resolver] {msg}", flush=True)
@@ -129,7 +149,7 @@ def build_ytdlp_command(client: Optional[str]) -> list[str]:
     # debuggable, and they only go to stderr, which we ignore on success.
     runtime = os.environ.get(JS_RUNTIME_ENV) or "node"
     cmd = [*base, "--no-playlist", "--js-runtimes", runtime]
-    cookies = os.environ.get(COOKIES_ENV)
+    cookies = cookies_file()
     if cookies:
         cmd += ["--cookies", cookies]
     # An explicit client wins, then the per-strategy one, then the env default.
@@ -157,7 +177,7 @@ def dependency_report() -> str:
         version = lines[0].strip() if lines else "unknown"
     except (OSError, subprocess.SubprocessError):
         version = "not found"
-    cookies = os.environ.get(COOKIES_ENV)
+    cookies = cookies_file()
     cookies_desc = f"set ({cookies})" if cookies else "off"
     return (
         f"yt-dlp {version}; js runtime {runtime} ({runtime_desc}); "

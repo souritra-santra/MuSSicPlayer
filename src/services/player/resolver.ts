@@ -13,11 +13,12 @@ import { extractYoutubeAudio } from './youtube';
  * direct audio stream, so no configuration is needed. When the minted stream
  * is preview-capped (things under a minute play, longer songs hit a 403), the
  * extractor detects that and reports it clearly. A user-supplied
- * cobalt-compatible endpoint overrides that path for preview-capped and
- * restricted videos and for other platforms. Cobalt endpoints stay
- * user-configured rather than hardcoded because public instances sit behind
- * bot protection and explicitly ask third-party apps not to ship against
- * them.
+ * cobalt-compatible endpoint takes precedence for YouTube — and covers other
+ * platforms: it can play full-length audio where the built-in extractor only
+ * gets a preview, with the built-in extractor as a fallback. Cobalt endpoints
+ * stay user-configured rather than hardcoded because public instances sit
+ * behind bot protection and explicitly ask third-party apps not to ship
+ * against them.
  */
 
 export type ResolverConfig = {
@@ -115,12 +116,12 @@ type CobaltResponse = {
  * Resolves a track to a playable URL.
  *
  * Directly-streamable providers (Jamendo, Audius, Internet Archive) short-
- * circuit to their stable URL. YouTube tracks resolve through the built-in
- * extractor, falling back to a configured cobalt endpoint when the video is
- * restricted. Anything else goes to the user's cobalt-compatible resolver: a
- * single POST with JSON in, JSON out. The response's `tunnel` variant is
- * proxied through the instance and needs an `Accept` header naming audio
- * content types; `redirect` is a direct link.
+ * circuit to their stable URL. YouTube tracks prefer a configured cobalt
+ * endpoint (full-length audio) and fall back to the built-in extractor.
+ * Anything else goes to the user's cobalt-compatible resolver: a single POST
+ * with JSON in, JSON out. The response's `tunnel` variant is proxied through
+ * the instance and needs an `Accept` header naming audio content types;
+ * `redirect` is a direct link.
  */
 export async function resolveStream(
   track: Track,
@@ -143,16 +144,17 @@ export async function resolveStream(
 }
 
 /**
- * YouTube path: the built-in extractor is the default. When it fails and the
- * user has supplied a cobalt-compatible endpoint, that endpoint is tried as
- * a fallback before surfacing the error.
+ * YouTube path. A configured resolver is the user's explicit YouTube override:
+ * it serves full-length audio where the built-in innertube extractor only gets
+ * a preview, so it is tried first, with the built-in extractor as a fallback.
+ * With no resolver configured the built-in extractor is used on its own.
  */
 async function resolveYoutubeStream(
   track: Track,
   config: ResolverConfig | null,
   signal?: AbortSignal,
 ): Promise<ResolvedStream> {
-  try {
+  const resolveBuiltin = async (): Promise<ResolvedStream> => {
     const extracted = await extractYoutubeAudio(track.externalId, signal);
     return {
       url: extracted.url,
@@ -160,19 +162,31 @@ async function resolveYoutubeStream(
       bitrateKbps: extracted.bitrateKbps,
       durationMs: extracted.durationMs ?? track.durationMs,
     };
-  } catch (primary: unknown) {
-    const primaryMessage = primary instanceof Error ? primary.message : String(primary);
-    if (config && config.endpoint.length > 0) {
+  };
+
+  if (config && config.endpoint.length > 0) {
+    try {
+      return await resolveViaCobalt(track, config, signal);
+    } catch (resolverError: unknown) {
+      const resolverMessage =
+        resolverError instanceof Error ? resolverError.message : String(resolverError);
       try {
-        return await resolveViaCobalt(track, config, signal);
-      } catch (fallback: unknown) {
-        const fallbackMessage = fallback instanceof Error ? fallback.message : String(fallback);
+        return await resolveBuiltin();
+      } catch (builtinError: unknown) {
+        const builtinMessage =
+          builtinError instanceof Error ? builtinError.message : String(builtinError);
         throw new StreamResolutionError(
           'youtube',
-          `${primaryMessage} The custom resolver also failed: ${fallbackMessage}`,
+          `${builtinMessage} The custom resolver also failed: ${resolverMessage}`,
         );
       }
     }
+  }
+
+  try {
+    return await resolveBuiltin();
+  } catch (primary: unknown) {
+    const primaryMessage = primary instanceof Error ? primary.message : String(primary);
     throw new StreamResolutionError('youtube', primaryMessage);
   }
 }

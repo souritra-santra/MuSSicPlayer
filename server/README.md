@@ -146,9 +146,10 @@ server at it is the reliable fix:
    "Get cookies.txt" extension, or `yt-dlp --cookies-from-browser chrome
    --cookies cookies.txt` on a machine with that browser.
 2. Point the server at the file: `--cookies cookies.txt` or
-   `YTDLP_COOKIES=/path/cookies.txt`. On Render, add it as a **Secret File**
-   mounted at `/etc/secrets/cookies.txt` and set
-   `YTDLP_COOKIES=/etc/secrets/cookies.txt`.
+   `YTDLP_COOKIES=/path/cookies.txt`. On Render, just add it as a **Secret File**
+   named `cookies.txt` (mounted at `/etc/secrets/cookies.txt`); the server picks
+   that path up automatically, so `YTDLP_COOKIES` is optional. On other hosts,
+   `cookies.txt` next to `ytdlp_resolver.py` is also auto-detected.
 3. Cookies expire (log out, password change, weeks of inactivity) — re-export if
    resolution starts failing again.
 
@@ -226,7 +227,7 @@ the app's resolver timeout is sized to cover it.
    | Variable | Value |
    | --- | --- |
    | `YTDLP_RESOLVER_API_KEY` | a long random string |
-   | `YTDLP_COOKIES` | `/etc/secrets/cookies.txt`, after adding that file under **Secret Files** — this is what makes Render's datacenter IP work (see *Authenticating with YouTube*) |
+   | `YTDLP_COOKIES` | optional — the server auto-detects a **Secret File** named `cookies.txt` (`/etc/secrets/cookies.txt`); this is what makes Render's datacenter IP work (see *Authenticating with YouTube*) |
    | `YTDLP_RESOLVER_PUBLIC_URL` | optional — `https://<service>.onrender.com` |
 
 4. Deploy, then open `https://<service>.onrender.com/health` and confirm the
