@@ -1,0 +1,83 @@
+{
+  "expo": {
+    "name": "Music Player",
+    "slug": "music-player-app",
+    "version": "1.1.1",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "musicplayer",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0B0F",
+    "primaryColor": "#8B5CF6",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.souri.musicplayer"
+    },
+    "android": {
+      "package": "com.souri.musicplayer",
+      "versionCode": 3,
+      "predictiveBackGestureEnabled": true,
+      "softwareKeyboardLayoutMode": "pan",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0B0F",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-sqlite",
+        {
+          "enableFTS": true,
+          "useSQLCipher": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true,
+          "enableBackgroundRecording": false
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0B0B0F",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 96
+        }
+      ],
+      [
+        "expo-status-bar",
+        {
+          "style": "light"
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "androidFontToLoad": []
+        }
+      ],
+      "expo-asset",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

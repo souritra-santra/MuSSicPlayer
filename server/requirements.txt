@@ -1,0 +1,9 @@
+# Install the nightly build with default extras. The default extras bundle
+# yt-dlp-ejs, which is what lets yt-dlp solve YouTube's poToken/botguard
+# challenge and return FULL-length streams instead of the ~70s preview cap.
+#
+#   python -m pip install -U --pre "yt-dlp[default]"
+#
+# A JavaScript runtime is also required for EJS: node>=22 or deno>=2.3.
+# (On Windows, `pip install yt-dlp` binary options exist too — see server/README.md.)
+yt-dlp[default]
