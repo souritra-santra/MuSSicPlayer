@@ -260,6 +260,7 @@ def stream_starts_serving_full(url: str) -> bool:
 
 def verify_stream(url: str, duration: Optional[float]) -> Tuple[str, Optional[float]]:
     """Return the URL as-is when it serves in full; else raise RuntimeError."""
+    log(f"verifying stream: {url}")
     if stream_starts_serving_full(url):
         return url, duration
     raise RuntimeError(
