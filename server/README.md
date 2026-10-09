@@ -153,6 +153,12 @@ server at it is the reliable fix:
 3. Cookies expire (log out, password change, weeks of inactivity) — re-export if
    resolution starts failing again.
 
+Read-only mounts are handled automatically: Render mounts Secret Files
+read-only, and yt-dlp re-writes the cookie jar it was given after extraction,
+which would fail with `OSError: Read-only file system`. The server therefore
+copies the cookies file to a writable private temp file once per process and
+hands that copy to yt-dlp — nothing to configure.
+
 If an instance is refused even with cookies, try `--player-client tv` (also
 `web_safari`, `mweb`); which client YouTube trusts varies by IP range.
 

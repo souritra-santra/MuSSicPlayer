@@ -58,6 +58,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -119,8 +120,8 @@ DEFAULT_COOKIE_FILES = (
 )
 
 
-def cookies_file() -> Optional[str]:
-    """Cookies file to hand yt-dlp, or None when none is available."""
+def cookies_source() -> Optional[str]:
+    """Configured or auto-detected cookies file (as mounted), or None."""
     explicit = os.environ.get(COOKIES_ENV)
     if explicit:
         return explicit
@@ -128,6 +129,39 @@ def cookies_file() -> Optional[str]:
         if os.path.isfile(candidate):
             return candidate
     return None
+
+
+# yt-dlp re-writes the cookie jar it was given (refreshed sessions, POT
+# tokens), so a file on a read-only mount — Render Secret Files, Vault, some
+# config volumes — fails with `OSError: Read-only file system` (Errno 30).
+# Stage a private writable copy once per process and hand THAT to yt-dlp.
+_STAGED_COOKIES_PATH = os.path.join(tempfile.gettempdir(), "ytdlp_resolver_cookies.txt")
+_staged_cookies: Optional[str] = None
+
+
+def _stage_cookies() -> Optional[str]:
+    global _staged_cookies
+    source = cookies_source()
+    if not source:
+        return None
+    if _staged_cookies is not None:
+        return _staged_cookies
+    try:
+        shutil.copyfile(source, _STAGED_COOKIES_PATH)
+        os.chmod(_STAGED_COOKIES_PATH, 0o600)
+    except OSError as exc:
+        log(f"could not stage a writable copy of the cookies file ({exc}); using the original")
+        # The original may still be readable; let yt-dlp report precisely if not.
+        _staged_cookies = source
+    else:
+        _staged_cookies = _STAGED_COOKIES_PATH
+        log(f"staged writable cookies copy at {_STAGED_COOKIES_PATH}")
+    return _staged_cookies
+
+
+def cookies_file() -> Optional[str]:
+    """Writable cookies path for yt-dlp, or None when none is available."""
+    return _stage_cookies()
 
 
 def _log_secrets_dir() -> None:
@@ -195,7 +229,7 @@ def dependency_report() -> str:
         version = lines[0].strip() if lines else "unknown"
     except (OSError, subprocess.SubprocessError):
         version = "not found"
-    cookies = cookies_file()
+    cookies = cookies_source()
     if cookies:
         # Prove the file is actually readable: Render mounts Secret Files
         # root-owned, so a permissions mistake would otherwise surface only as
