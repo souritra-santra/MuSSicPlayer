@@ -130,6 +130,24 @@ def cookies_file() -> Optional[str]:
     return None
 
 
+def _log_secrets_dir() -> None:
+    """Log what the platform mounted under /etc/secrets (Render Secret Files).
+
+    Rendering the cookies file found by auto-detection silently depends on a
+    Secret File being named exactly `cookies.txt`. Listing the directory at
+    startup makes a misnamed, unsaved, or unreadable upload visible in the
+    host's logs instead of an opaque `cookies off`.
+    """
+    secrets_dir = "/etc/secrets"
+    if not os.path.isdir(secrets_dir):
+        return
+    try:
+        names = sorted(os.listdir(secrets_dir))
+    except OSError as exc:
+        names = [f"<unreadable: {exc}>"]
+    log(f"secret files in {secrets_dir}: {', '.join(names) if names else '(empty)'}")
+
+
 def log(msg: str) -> None:
     print(f"[ytdlp-resolver] {msg}", flush=True)
 
@@ -819,6 +837,7 @@ def main() -> int:
     state = ResolverState(args.mode, args.api_key, args.public_url, deps)
     handler = type("ConfiguredHandler", (ResolverHandler,), {"state": state})
     server = ResolverServer((args.host, args.port), handler)
+    _log_secrets_dir()
     log(
         f"listening on http://{args.host}:{args.port} mode={args.mode} "
         f"api_key={'set' if args.api_key else 'off'}"
