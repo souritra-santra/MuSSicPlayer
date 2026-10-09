@@ -361,10 +361,24 @@ BOT_WALL_MARKERS = (
     "http error 403",
 )
 
+# yt-dlp printing this means the file parsed but YouTube rejected the account
+# cookies in it (rotated in the browser, expired, or a session that was
+# logged out) — no code change helps, a fresh export does.
+REJECTED_COOKIES_MARKERS = (
+    "provided youtube account cookies are no longer valid",
+    "cookie expired",
+    "cookies are no longer valid",
+)
+
 
 def _looks_like_bot_wall(text: str) -> bool:
     lowered = text.lower()
     return any(marker in lowered for marker in BOT_WALL_MARKERS)
+
+
+def _looks_like_rejected_cookies(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in REJECTED_COOKIES_MARKERS)
 
 
 def resolve_with_fallback(
@@ -398,6 +412,14 @@ def resolve_with_fallback(
             "YouTube refused this host's IP (HTTP 429/403). Give the server a "
             "signed-in cookies file: --cookies / YTDLP_COOKIES, or a Render "
             "Secret File named cookies.txt (auto-detected at /etc/secrets/)."
+        )
+        log("hint: " + hint)
+        raise RuntimeError(f"{last_error} {hint}")
+    if cookies_file() is not None and _looks_like_rejected_cookies(last_error):
+        hint = (
+            "The cookies file is present but YouTube rejects it (rotated or "
+            "expired). Re-export a fresh cookies.txt from a browser signed in "
+            "to YouTube and re-upload it (Render Secret Files -> cookies.txt)."
         )
         log("hint: " + hint)
         raise RuntimeError(f"{last_error} {hint}")
