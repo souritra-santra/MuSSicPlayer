@@ -151,7 +151,18 @@ server at it is the reliable fix:
    that path up automatically, so `YTDLP_COOKIES` is optional. On other hosts,
    `cookies.txt` next to `ytdlp_resolver.py` is also auto-detected.
 3. Cookies expire (log out, password change, weeks of inactivity) — re-export if
-   resolution starts failing again.
+   resolution starts failing again. Before uploading, prove the export works on
+   your own machine:
+
+   ```bash
+   yt-dlp --cookies cookies.txt --simulate --print "%(title)s" "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+   ```
+
+   Printing a title means the cookies are valid; a `The provided YouTube
+   account cookies are no longer valid` warning means re-export. If that
+   warning appears *on the server*, the Secret File is stale — refresh it and
+   redeploy (pasting into Render must preserve the file's tab/newline
+   structure).
 
 Read-only mounts are handled automatically: Render mounts Secret Files
 read-only, and yt-dlp re-writes the cookie jar it was given after extraction,
